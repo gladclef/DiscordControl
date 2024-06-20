@@ -9,11 +9,115 @@ import screeninfo
 from PIL import Image
 
 
+class Pxy():
+	""" Represents a single point (typically a pixel). """
+	def __init__(self, x: int , y: int):
+		self.x = x
+		self.y = y
+
+	def clip(self, min_x: int, max_x: int, min_y: int, max_y: int) -> "Pxy":
+		x = np.clip(self.x, min_x, max_x)
+		y = np.clip(self.y, min_y, max_y)
+		return Pxy(x, y)
+	
+	def astuple(self) -> tuple[int, int]:
+		return (self.x, self.y)
+	
+	def __add__(self, other: "Pxy") -> "Pxy":
+		return Pxy(self.x + other.x, self.y + other.y)
+	
+	def __sub__(self, other: "Pxy") -> "Pxy":
+		return self + -1*other
+	
+	def __mul__(self, other: int) -> "Pxy":
+		return Pxy(int(self.x * other), int(self.y * other))
+	
+	def __div__(self, other: int) -> "Pxy":
+		return self * (1.0 / other)
+	
+	def __eq__(self, other: "Pxy") -> bool:
+		return self.x == other.x and self.y == other.y
+	
+	def __repr__(self) -> str:
+		return "{%d,%d}" % (self.x, self.y)
+
+
+class Rect():
+	""" Represents a rectangular region in screen coordinates
+	(x positive to the right, y positive down). """
+	def __init__(self, top_left: Pxy, bottom_right: Pxy):
+		# validate the input
+		if (top_left.x > bottom_right.x) or (top_left.y > bottom_right.y):
+			raise ValueError(f"Top-left x/y must be less than bottom-right x/y, but tl={top_left} and br={bottom_right}")
+
+		self.top_left = top_left
+		self.bottom_right = bottom_right
+
+	@classmethod
+	def from_ltrb(cls: type["Rect"], left: int, top: int, right: int, bottom: int) -> "Rect":
+		ret: "Rect" = cls(Pxy(left, top), Pxy(right, bottom))
+		return ret
+
+	@classmethod
+	def from_xywh(cls: type["Rect"], x: int, y: int, width: int, height: int) -> "Rect":
+		ret: "Rect" = cls(Pxy(x, y), Pxy(x+width, y+height))
+		return ret
+	
+	@property
+	def x(self) -> int:
+		return self.top_left.x
+	
+	@property
+	def y(self) -> int:
+		return self.top_left.y
+	
+	@property
+	def width(self) -> int:
+		return self.bottom_right.x - self.top_left.x
+	
+	@property
+	def height(self) -> int:
+		return self.bottom_right.y - self.top_left.y
+
+	def to_xywh(self) -> tuple[int, int, int, int]:
+		return self.top_left.x, self.top_left.y, self.width, self.height
+	
+	def to_ltrb(self) -> tuple[int, int, int, int]:
+		return self.top_left.x, self.top_left.y, self.bottom_right.x, self.bottom_right.y
+	
+	def contains(self, point: Pxy) -> bool:
+		l, t, r, b = self.to_ltrb()
+		if point.x >= l and point.x <= r and point.y >= t and point.y <= b:
+			return True
+		return False
+	
+	def clip(self, min_x: int, max_x: int, min_y: int, max_y: int) -> "Rect":
+		top_left = self.top_left.clip(min_x, max_x, min_y, max_y)
+		min_x2, min_y2 = np.max([min_x, top_left.x]), np.max([min_y, top_left.y])
+		bottom_right = self.bottom_right.clip(min_x2, max_x, min_y2, max_y)
+		return Rect(top_left, bottom_right)
+	
+	def get_corners_xy(self, zero_index = False) -> list[Pxy]:
+		if zero_index:
+			ret = [(self.x, self.y), (self.x+self.width-1, self.y), (self.x+self.width-1, self.y+self.height-1), (self.x, self.y+self.height-1)]
+		else:
+			ret = [(self.x, self.y), (self.x+self.width, self.y), (self.x+self.width, self.y+self.height), (self.x, self.y+self.height)]
+		return [Pxy(x, y) for x, y in ret]
+	
+	def __add__(self, other: Pxy) -> "Rect":
+		return Rect(self.top_left + other, self.bottom_right + other)
+	
+	def __repr__(self):
+		return "Rect{x:%d,y:%d,w:%d,h:%d}" % (self.x, self.y, self.width, self.height)
+
+
 class DiscordWindowFinder():
+	""" Utility class to locate the discord window. """
+
 	def __init__(self):
-		self.dxcam_idx = 0
+		self.dxcam_idx: int = 0
 		self.camera: dxcam.DXCamera = None
-		self.monitor_xy: tuple[int, int] = None
+		self.monitor_loc: Pxy = None
 
 		self.get_camera_for_discord()
 	
@@ -28,56 +132,34 @@ class DiscordWindowFinder():
 	def get_camera_for_discord(self):
 		""" Chooses the camera application in which discord is currently visible. """
 		# get the region of the continuous screen in which to find discord.
-		l, t, w, h = self._get_discord_region_xywh()
+		reg: Rect = self._get_discord_region()
 
 		# choose the monitor that contains the center pixel for discord
-		target_pixel = l + int(w / 2), t + int(h / 2)
-		self.dxcam_idx, mon_left, mon_top = self._get_monitor_idxlefttop_for_virtual_screen_location(target_pixel)
-		self.monitor_xy = mon_left, mon_top
+		target_pixel: Pxy = reg.top_left + Pxy(int(reg.width / 2), int(reg.height / 2))
+		self.dxcam_idx, self.monitor_loc = self._get_matching_monitor_idx_loc(target_pixel)
 
 		# setup the camera for the discord screen
 		self.camera = dxcam.create(output_idx=self.dxcam_idx)
 	
-	def grab(self, reg_xywh: tuple[int, int, int, int] = None) -> np.ndarray:
+	def grab(self, reg: Rect = None) -> np.ndarray:
 		# get the discord region, normalized to the discord monitor's location
-		dx, dy, dw, dh = self._get_discord_region_xywh()
-		dx += self.monitor_xy[0]
-		dy += self.monitor_xy[1]
+		discord_reg = self._get_discord_region()
+		discord_reg += self.monitor_loc
 
 		# normalize input
-		if reg_xywh is None:
-			reg_xywh = dx, dy, dw, dh
-		x, y, w, h = reg_xywh
+		if reg is None:
+			reg = discord_reg
 
 		# restrict to the bounds of the discord monitor
-		x = np.min([np.max([x, 0]), self.camera.width])
-		y = np.min([np.max([y, 0]), self.camera.height])
-		w = np.min([np.max([w, 0]), self.camera.width - x])
-		h = np.min([np.max([h, 0]), self.camera.height - y])
-
-		# convert to ltrb
-		l = x
-		t = y
-		r = x + w
-		b = y + h
+		reg = reg.clip(0, self.camera.width, 0, self.camera.height)
 
 		# grab the region
-		ret = self.camera.grab((l, t, r, b))
+		ret = self.camera.grab(reg.to_ltrb())
 
 		return ret
 
-	def grab_user_images_slice(self) -> np.ndarray:
-		x = 116 # user images are typically at x=116
-		y = 0
-		w = 50 # user images are very small
-		h = self.camera.height
-
-		slice = self.grab((x, y, w, h))
-
-		return slice
-
 	@staticmethod
-	def _get_window_rect_from_name(name:str)-> tuple[int, int, int, int] | None:
+	def _get_window_region_from_name(name:str)-> Rect | None:
 		hwnds = pywinauto.findwindows.find_windows(title_re=".*"+name+".*")
 		if len(hwnds) == 0:
 			return None
@@ -88,34 +170,33 @@ class DiscordWindowFinder():
 
 		rect = ctypes.wintypes.RECT()
 		ctypes.windll.user32.GetWindowRect(hwnd, ctypes.pointer(rect))
-		return (rect.left, rect.top, rect.right, rect.bottom)
+		return Rect.from_ltrb(rect.left, rect.top, rect.right, rect.bottom)
 
 	@staticmethod
-	def _get_discord_region_xywh() -> tuple[int, int, int, int] | None:
-		reg = DiscordWindowFinder._get_window_rect_from_name('Discord')
+	def _get_discord_region() -> Rect:
+		reg = DiscordWindowFinder._get_window_region_from_name('Discord')
 		if reg is None:
 			raise RuntimeError("Failed to find window matching 'Discord'")
-		l, t, r, b = reg
-
-		return (l, t, r-l, b-t)
+		return reg
 
 	@staticmethod
-	def _get_monitor_idxlefttop_for_virtual_screen_location(screen_location: tuple[int, int]) -> tuple[int, int, int]:
+	def _get_matching_monitor_idx_loc(screen_location: Pxy) -> tuple[int, Pxy]:
 		# get monitor working areas
-		output_working_areas: list[tuple[int, int, int, int]] = []
+		output_working_areas: list[Rect] = []
 		for i, monitor in enumerate(screeninfo.get_monitors()):
-			output_working_areas.append((monitor.x, monitor.y, monitor.width, monitor.height))
+			output_working_areas.append(Rect.from_xywh(monitor.x, monitor.y, monitor.width, monitor.height))
 
 		# choose the monitor that contains the center pixel for discord
 		for i, area in enumerate(output_working_areas):
-			wl, wt, wr, wb = area[0], area[1], area[0]+area[2], area[1]+area[3]
-			if wl < screen_location[0] and wr > screen_location[0] and wt < screen_location[1] and wb > screen_location[1]:
-				return i, wl, wt
+			if area.contains(screen_location):
+				return i, area.top_left
 		
-		raise RuntimeError(f"Could not find monitor containing virtual screen location {screen_location}")
+		raise RuntimeError(f"Could not find a monitor containing virtual screen location {screen_location}")
 
 
 class UserImagesLocator():
+	""" Locates user images within the discord window. """
+
 	def __init__(self, discord_frame_grabber: DiscordWindowFinder, user_images_dir: str):
 		self.discord_frame_grabber = discord_frame_grabber
 		self.user_images_dir = user_images_dir
@@ -153,43 +234,70 @@ class UserImagesLocator():
 
 		return self.user_images
 
-	def find_user_images(self):
+	def grab_user_images_slice(self) -> np.ndarray:
+		x = 116 # user images are typically at x=116
+		y = 0
+		w = 50 # user images are very small
+		h = self.discord_frame_grabber.camera.height
+		reg = Rect.from_xywh(x, y, w, h)
+
+		slice = self.discord_frame_grabber.grab(reg)
+
+		return slice
+
+	def locate_names_regions_annotations(self) -> tuple[dict[str, Rect], np.ndarray]:
+		""" Locates user images within the discord window.
+		
+		Returns
+		-------
+		names_to_regions: dict[str, Rect]
+			The rectangular region for each found user image, in
+			screen coordinates relative to the discord window.
+		annotated_slice: np.ndarray
+			An small annotated screenshot of discord with the user
+			images highlighted.
+		"""
 		slice = self.discord_frame_grabber.grab_user_images_slice()
+		user_images_regions: dict[str, Rect] = {}
 		annotated_slice = slice.copy()
 
 		for name_ext in self.user_images:
 			user_image = self.user_images[name_ext]
 
-			# Start by matching off the corner pixels
+			# Start by matching off the corner pixels (and center pixel).
+			# We do this for speed, since np.where and np.logical_and are much
+			# faster than scanning through the entire slice for the user image.
 			w, h = user_image.shape[1], user_image.shape[0]
-			sample_pixels = [(0, 0), (w-1, 0), (w-1, h-1), (0, h-1), (int(w/2), int(h/2))]
+			sample_pixels = Rect.from_xywh(0, 0, w, h).get_corners_xy(True)
+			sample_pixels.append(Pxy(int(w/2), int(h/2)))
 			matches: list[bool] = []
 			for i, pixel in enumerate(sample_pixels):
-				x, y = pixel
-				shifted_slice = slice[y:slice.shape[0]-(h-y-1), x:slice.shape[1]-(w-x-1)]
+				shifted_slice = slice[pixel.y:slice.shape[0]-(h-pixel.y-1), pixel.x:slice.shape[1]-(w-pixel.x-1)]
 				if i == 0:
-					matches = shifted_slice == user_image[y, x]
+					matches = shifted_slice == user_image[pixel.y, pixel.x]
 				else:
-					matches = np.logical_and(matches, shifted_slice == user_image[y, x])
+					matches = np.logical_and(matches, shifted_slice == user_image[pixel.y, pixel.x])
 			matching_coords = np.where(matches)
 
 			# Search for exact matches to our approximate matches
 			x_searches, y_searches = matching_coords[1].tolist(), matching_coords[0].tolist()
-			match_xy = None
+			match: Rect = None
 			for x, y in zip(x_searches, y_searches):
-				if np.all(slice[y:y+h, x:x+w] == user_image):
-					match_xy = x, y
-					break
-			if match_xy is None:
+				if x+w <= slice.shape[1] and y+h <= slice.shape[0]:
+					if np.all(slice[y:y+h, x:x+w] == user_image):
+						match = Rect.from_xywh(x, y, w, h)
+						break
+			if match is None:
 				continue
 
-			# Step 2: Get the size of the template. This is the same size as the match.
-			trows,tcols = user_image.shape[:2]
+			# Add the match to our return value
+			user_images_regions[name_ext] = match
 
-			# Step 3: Draw the rectangle on large_image
-			annotated_slice = cv2.rectangle(annotated_slice, match_xy, (match_xy[0]+tcols,match_xy[1]+trows),(0,0,255),2)
+			# Debugging: draw the rectangle on large_image
+			magenta = (255,0,255)
+			annotated_slice = cv2.rectangle(annotated_slice, match.top_left.astuple(), match.bottom_right.astuple(), magenta, thickness=2)
 		
-		return annotated_slice
+		return user_images_regions, annotated_slice
 
 
 if __name__ == "__main__":
@@ -197,6 +305,8 @@ if __name__ == "__main__":
 
 	grabber = DiscordWindowFinder()
 	user_locator = UserImagesLocator(grabber, user_images_dir)
-	annotated = user_locator.find_user_images()
+	user_images_regions, annotated = user_locator.locate_name_region_annotations()
+	for name in user_images_regions:
+		print(f"{name}: {user_images_regions[name]}")
 	img = Image.fromarray(annotated)
 	img.show()
