@@ -118,10 +118,13 @@ class _DiscordAPI():
         return False
 
     
+global last_mouse_over_user_pos
 dapi = _DiscordAPI(app_images_dir, user_images_dir)
+last_mouse_over_user_pos: Pxy = None
 
 
 def mouse_over_user(user_idx_or_name: int | str):
+    global last_mouse_over_user_pos
     dapi.update()
 
     # activate the discord window
@@ -153,14 +156,20 @@ def mouse_over_user(user_idx_or_name: int | str):
 
     # move the mouse into position
     user_loc = dapi.discord_window.virtual_coord(user.voice_icon_region.top_left)
-    mouse.position = (user_loc + Pxy(5, 5)).astuple()
+    last_mouse_over_user_pos = (user_loc + Pxy(5, 5))
+    mouse.position = last_mouse_over_user_pos.astuple()
 
 
-def set_user_volume(user_idx_or_name: int | str, volume_0_100: int):
-    mouse_over_user(user_idx_or_name)
+def set_user_volume(user_idx_or_name: int | str, volume_0_100: int, dont_open_context_menu: bool = False):
+    if not dont_open_context_menu:
+        mouse_over_user(user_idx_or_name)
 
-    # open the context menu
-    mouse.click(Button.right)
+        # open the context menu
+        mouse.click(Button.right)
+
+    # get the position to move the mouse relative to
+    global last_mouse_over_user_pos
+    start_pos = last_mouse_over_user_pos
 
     # get the location of the volume slider
     # X is between 17 and 170
@@ -170,7 +179,7 @@ def set_user_volume(user_idx_or_name: int | str, volume_0_100: int):
     y_rel_pos = 257
 
     # set the user's volume
-    volume_pos = Pxy(mouse.position[0] + x_rel_pos, mouse.position[1] + y_rel_pos)
+    volume_pos = Pxy(start_pos.x + x_rel_pos, start_pos.y + y_rel_pos)
     mouse.position = volume_pos.astuple()
     mouse.click(Button.left)
     
