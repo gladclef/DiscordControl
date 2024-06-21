@@ -7,7 +7,7 @@ import discord_interaction.dapi as dapi
 from pynput.keyboard import Controller, Key
 
 UDP_IP = "127.0.0.1"
-UDP_PORTs = [6332, 6333]
+UDP_PORTs = [6331, 6332, 6333]
 
 global action_queue
 messages: list[tuple[int, str]] = []
@@ -68,13 +68,32 @@ def evaluate_actions():
         if len(action_queue) > 0:
             last_action = action_queue[-1]
 
-            if last_action.action_type == "next_user":
-                action_queue = list(filter(lambda a: a.action_type != "next_user", action_queue))
-                select_next_user()
+            if last_action.action_type == "mute":
+                action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
+                try:
+                    if last_action.data < 0.5:
+                        dapi.mute()
+                    else:
+                        dapi.unmute()
+                except Exception as ex:
+                    print(last_action.action_type + ": " + repr(ex))
+                    pass
+
+            elif last_action.action_type == "next_user":
+                action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
+                try:
+                    select_next_user()
+                except Exception as ex:
+                    print(last_action.action_type + ": " + repr(ex))
+                    pass
 
             elif last_action.action_type == "set_volume":
-                action_queue = list(filter(lambda a: a.action_type != "set_volume", action_queue))
-                adjust_user_volume(last_action.data)
+                action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
+                try:
+                    adjust_user_volume(last_action.data)
+                except Exception as ex:
+                    print(last_action.action_type + ": " + repr(ex))
+                    pass
 
         time.sleep(0.01)
 
@@ -110,6 +129,8 @@ if __name__ == "__main__":
                     print("received message on port %d: %f" % (port, data))
 
                     try:
+                        if port == 6331:
+                            action_queue.append(Action("mute", data))
                         if port == 6332:
                             action_queue.append(Action("next_user"))
                         if port == 6333:
