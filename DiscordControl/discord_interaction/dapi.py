@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 
 import cv2 as cv
 import numpy as np
@@ -65,6 +66,8 @@ class _DiscordAPI():
     
     def get_user_by_name(self, partial_name: str) -> User:
         for user in self.users.get():
+            print(user.voice_icon_path_name_ext)
+            print(user.voice_icon_name_ext)
             if partial_name in user.voice_icon_name_ext:
                 return user
         return None
@@ -118,36 +121,51 @@ class _DiscordAPI():
 dapi = _DiscordAPI(app_images_dir, user_images_dir)
 
 
-def set_user_volume(user_idx_or_name: int | str, volume_0_100: int):
+def mouse_over_user(user_idx_or_name: int | str):
     dapi.update()
 
-    # normalize the input
-    volume_0_100 = np.clip(volume_0_100, 0, 100)
-
-    # get the user
-    if isinstance(user_idx_or_name, str):
-        user = dapi.get_user_by_name(user_idx_or_name)
-    else:
-        user = dapi.get_user_by_index(user_idx_or_name)
-    if user is None:
-        raise ValueError(f"User with name or index {user_idx_or_name} can't be found!")
-    
     # activate the discord window
     dapi.discord_window.activate_window()
 
-    # close any existing ui elements
-    keyboard.tap(Key.esc)
-    keyboard.tap(Key.esc)
+    # get the user
+    stop_search_time = datetime.now() + timedelta(seconds=0.5)
+    while True:
+        # close any existing ui elements
+        keyboard.tap(Key.esc)
+        keyboard.tap(Key.esc)
 
-    # open the user's context menu
+        # get the user
+        if isinstance(user_idx_or_name, str):
+            user = dapi.get_user_by_name(user_idx_or_name)
+        else:
+            user = dapi.get_user_by_index(user_idx_or_name)
+        if user is not None:
+            break
+        
+        # allow for re-acquisition of the frame grab
+        dapi.update()
+
+        # stop after 0.5 seconds
+        if datetime.now() > stop_search_time:
+            break
+    if user is None:
+        raise ValueError(f"User with name or index {user_idx_or_name} can't be found!")
+
+    # move the mouse into position
     user_loc = dapi.discord_window.virtual_coord(user.voice_icon_region.top_left)
     mouse.position = (user_loc + Pxy(5, 5)).astuple()
+
+
+def set_user_volume(user_idx_or_name: int | str, volume_0_100: int):
+    mouse_over_user(user_idx_or_name)
+
+    # open the context menu
     mouse.click(Button.right)
 
     # get the location of the volume slider
-    # X is between 16 and 171
-    x_range = 171 - 16
-    x_rel_pos = 16 + np.clip(np.round([x_range / 100 * volume_0_100]), 0, x_range)
+    # X is between 17 and 170
+    x_range = 170 - 17
+    x_rel_pos = 17 + np.clip(np.round([x_range / 100 * volume_0_100]), 0, x_range)
     # Y is always at relative position 257
     y_rel_pos = 257
 
@@ -182,4 +200,4 @@ def unmute():
     
 
 if __name__ == "__main__":
-    unmute()
+    mouse_over_user(0)

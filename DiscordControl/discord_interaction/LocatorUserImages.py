@@ -115,4 +115,7 @@ class LocatorUserImages():
 			magenta = (255,0,255)
 			annotated_slice = cv2.rectangle(annotated_slice, match.top_left.astuple(), match.bottom_right.astuple(), magenta, thickness=2)
 		
+		# Sort users by their y-location
+		users = sorted(users, key=lambda u: u.voice_icon_region.y)
+		
 		return users, annotated_slice
