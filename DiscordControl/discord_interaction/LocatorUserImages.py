@@ -7,6 +7,7 @@ from PIL import Image
 
 sys.path.append(os.path.normpath(os.path.join(__file__, "..", "..")))
 from discord_interaction.DiscordWindowFinder import DiscordWindowFinder
+from discord_interaction.User import User
 from geometry import Pxy, Rect
 
 
@@ -50,7 +51,7 @@ class LocatorUserImages():
 
 		return self.user_images
 
-	def grab_user_images_slice(self) -> np.ndarray:
+	def grab_user_images_slice(self) -> tuple[np.ndarray, Pxy]:
 		x = 116 # user images are typically at x=116
 		y = 0
 		w = 50 # user images are very small
@@ -59,22 +60,22 @@ class LocatorUserImages():
 
 		slice = self.discord_frame_grabber.grab(reg)
 
-		return slice
+		return slice, reg.top_left
 
-	def locate_names_regions_annotations(self) -> tuple[dict[str, Rect], np.ndarray]:
+	def locate_users_annotations(self) -> tuple[list[User], np.ndarray]:
 		""" Locates user images within the discord window.
 		
 		Returns
 		-------
-		names_to_regions: dict[str, Rect]
-			The rectangular region for each found user image, in
-			screen coordinates relative to the discord window.
+		users: list[User]
+			Each found user with a visible user image corresponding
+			to one of images in self.user_images_dir.
 		annotated_slice: np.ndarray
 			An small annotated screenshot of discord with the user
 			images highlighted.
 		"""
-		slice = self.grab_user_images_slice()
-		user_images_regions: dict[str, Rect] = {}
+		slice, window_offset = self.grab_user_images_slice()
+		users: list[User] = []
 		annotated_slice = slice.copy()
 
 		for name_ext in self.user_images:
@@ -107,10 +108,11 @@ class LocatorUserImages():
 				continue
 
 			# Add the match to our return value
-			user_images_regions[name_ext] = match
+			window_rel_match = match + window_offset
+			users.append(User(os.path.join(self.user_images_dir, name_ext), window_rel_match))
 
 			# Debugging: draw the rectangle on large_image
 			magenta = (255,0,255)
 			annotated_slice = cv2.rectangle(annotated_slice, match.top_left.astuple(), match.bottom_right.astuple(), magenta, thickness=2)
 		
-		return user_images_regions, annotated_slice
+		return users, annotated_slice

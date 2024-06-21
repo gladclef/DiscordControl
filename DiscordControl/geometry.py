@@ -19,12 +19,12 @@ class Pxy():
 		return Pxy(self.x + other.x, self.y + other.y)
 	
 	def __sub__(self, other: "Pxy") -> "Pxy":
-		return self + -1*other
+		return self + (other * -1)
 	
 	def __mul__(self, other: int) -> "Pxy":
 		return Pxy(int(self.x * other), int(self.y * other))
 	
-	def __div__(self, other: int) -> "Pxy":
+	def __truediv__(self, other: int) -> "Pxy":
 		return self * (1.0 / other)
 	
 	def __eq__(self, other: "Pxy") -> bool:
@@ -90,6 +90,7 @@ class Rect():
 		return Rect(top_left, bottom_right)
 	
 	def get_corners_xy(self, zero_index = False) -> list[Pxy]:
+		""" Get the corners of this region in tl, tr, br, bl order """
 		if zero_index:
 			ret = [(self.x, self.y), (self.x+self.width-1, self.y), (self.x+self.width-1, self.y+self.height-1), (self.x, self.y+self.height-1)]
 		else:
@@ -98,6 +99,9 @@ class Rect():
 	
 	def __add__(self, other: Pxy) -> "Rect":
 		return Rect(self.top_left + other, self.bottom_right + other)
+	
+	def __sub__(self, other: Pxy) -> "Rect":
+		return self + (other * -1)
 	
 	def __repr__(self):
 		return "Rect{x:%d,y:%d,w:%d,h:%d}" % (self.x, self.y, self.width, self.height)
