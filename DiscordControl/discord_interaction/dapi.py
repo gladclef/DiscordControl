@@ -104,7 +104,6 @@ class _DiscordAPI():
         self.discord_window.activate_window()
 
         # grab the mic image
-        voice_status_corner = self.discord_window.virtual_coord(Pxy(80, -152), 'bl')
         mic_center = self.mic_center_for_grabbing.get()
         mic_region = Rect(mic_center - Pxy(13, 13), mic_center + Pxy(13, 13))
         mic_image = self.discord_window.grab(mic_region - self.discord_window.window_corner())

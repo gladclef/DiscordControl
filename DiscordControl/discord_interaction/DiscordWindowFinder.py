@@ -8,6 +8,7 @@ import numpy as np
 import pywinauto
 import screeninfo
 from geometry import Pxy, Rect
+from PIL import ImageGrab
 
 sys.path.append(os.path.normpath(os.path.join(__file__, "..", "..")))
 from Fresh import Fresh
@@ -80,11 +81,12 @@ class DiscordWindowFinder():
 		reg = reg.clip(0, self.camera.width, 0, self.camera.height)
 
 		# grab the region
-		for i in range(100):
-			ret = self.camera.grab(reg.to_ltrb())
-			if ret is not None:
-				break
-			time.sleep(0.001) # need a small delay between subsequent frame grabs
+		ret = self.camera.grab(reg.to_ltrb())
+		if ret is None:
+			# DXcam only seems to work when the screen is being actively redrawn,
+			# fall back on Pillow.
+			ret_img = ImageGrab.grab((reg + self.monitor_loc).to_ltrb(), all_screens=True)
+			ret = np.array(ret_img)
 
 		return ret
 	
