@@ -34,7 +34,7 @@ class _DiscordAPI():
         self.user_locator = LocatorUserImages(self.discord_window, user_images_dir)
 
         self.users: Fresh[list[User]] = Fresh(lambda: self.user_locator.locate_users_annotations()[0])
-        self.mic_center_for_grabbing: Fresh[Pxy] = Fresh(self._get_mic_center_for_grabbing)
+        self.mic_center_for_grabbing: Fresh[Pxy] = Fresh(self._get_mic_center_for_grabbing, expiration_ref_obj=self.discord_window._get_discord_region)
         self.mic_image: np.ndarray = None
         self.mic_mask: np.ndarray = None
 
@@ -125,7 +125,6 @@ last_mouse_over_user_pos: Pxy = None
 
 def mouse_over_user(user_idx_or_name: int | str):
     global last_mouse_over_user_pos
-    dapi.update()
 
     # activate the discord window
     dapi.discord_window.activate_window()
@@ -145,9 +144,6 @@ def mouse_over_user(user_idx_or_name: int | str):
         if user is not None:
             break
         
-        # allow for re-acquisition of the frame grab
-        dapi.update()
-
         # stop after 0.5 seconds
         if datetime.now() > stop_search_time:
             break
@@ -185,8 +181,6 @@ def set_user_volume(user_idx_or_name: int | str, volume_0_100: int, dont_open_co
     
 
 def mute():
-    dapi.update()
-    
     # activate the discord window
     dapi.discord_window.activate_window()
 
@@ -197,8 +191,6 @@ def mute():
 
 
 def unmute():
-    dapi.update()
-    
     # activate the discord window
     dapi.discord_window.activate_window()
 

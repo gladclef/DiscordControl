@@ -5,11 +5,13 @@ T = TypeVar("T")
 
 class Fresh(Generic[T]):
     """ Wrapper class to ensure that the stored value
-    is always new within a given expiration time window. """
+    is always new within a given expiration_time time window. """
 
-    def __init__(self, getter: Callable[[], T], expiration: timedelta = timedelta(seconds=10)):
+    def __init__(self, getter: Callable[[], T], expiration_time: timedelta | None = timedelta(seconds=10), expiration_ref_obj: Callable = None):
         self.getter = getter
-        self.expiration = expiration
+        self.expiration_time = expiration_time
+        self.expiration_ref_obj = expiration_ref_obj
+        self.last_ref_obj = None
         
         self.curr_val: T = None
         self.needs_refresh = True
@@ -18,12 +20,30 @@ class Fresh(Generic[T]):
 
     @property
     def is_expired(self) -> bool:
-        return self.last_access_time + self.expiration < datetime.now()
+        is_expired = False
+
+        if self.expiration_time is not None:
+            is_expired = is_expired or (self.last_access_time + self.expiration_time < datetime.now())
+        if self.expiration_ref_obj is not None:
+            obj = self.expiration_ref_obj()
+            if obj is None:
+                if self.last_ref_obj is not None:
+                    is_expired = False
+            elif obj is not None:
+                if self.last_ref_obj is None:
+                    is_expired = False
+                else:
+                    is_expired = is_expired or (obj != self.last_ref_obj)
+        
+        return is_expired
 
     def _get_fresh_value(self):
         self.curr_val = self.getter()
         self.needs_refresh = False
+
         self.last_access_time = datetime.now()
+        if self.expiration_ref_obj is not None:
+            self.last_ref_obj = self.expiration_ref_obj()
     
     def get(self):
         if self.needs_refresh:
