@@ -27,6 +27,9 @@ class Action():
     def __init__(self, action_type: str, data: float = 0):
         self.action_type = action_type
         self.data = data
+    
+    def __repr__(self):
+        return "A{%s,%f}" % (self.action_type, self.data)
 
 
 def select_user(user_idx: int):

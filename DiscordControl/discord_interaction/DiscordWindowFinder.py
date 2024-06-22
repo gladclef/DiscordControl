@@ -1,7 +1,6 @@
 import ctypes
 import os
 import sys
-import time
 
 import dxcam
 import numpy as np
@@ -11,7 +10,6 @@ from geometry import Pxy, Rect
 from PIL import ImageGrab
 
 sys.path.append(os.path.normpath(os.path.join(__file__, "..", "..")))
-from Fresh import Fresh
 
 
 class DiscordWindowFinder():
@@ -21,7 +19,7 @@ class DiscordWindowFinder():
         self.dxcam_idx: int = 0
         self.camera: dxcam.DXCamera = None
         self.monitor_loc: Pxy = None
-        self.hwnd = Fresh(self._get_discord_window_handle)
+        self.discord_handle: int = None
 
         self._get_camera_for_discord()
     
@@ -54,13 +52,16 @@ class DiscordWindowFinder():
         self.camera = dxcam.create(output_idx=self.dxcam_idx)
     
     def does_window_exist(self):
-        return self.hwnd.get() != None
+        hwnd = self.discord_handle
+        user32 = ctypes.windll.user32
+        return user32.IsWindow(hwnd)
 
     def activate_window(self):
+        hwnd = self.get_discord_window_handle()
         user32 = ctypes.windll.user32
-        user32.SetForegroundWindow(self.hwnd.get())
-        if user32.IsIconic(self.hwnd.get()):
-            user32.ShowWindow(self.hwnd.get(), 9)
+        user32.SetForegroundWindow(hwnd)
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)
     
     def grab(self, reg: Rect = None) -> np.ndarray:
         """ Grabs an image from the screen, relative to Discord's window """
@@ -108,8 +109,13 @@ class DiscordWindowFinder():
         the given discord window coordinate. """
         return self.window_corner(rel) + coord
 
-    @staticmethod
-    def _get_discord_window_handle():
+    def get_discord_window_handle(self):
+        if self.discord_handle is not None:
+            if self.does_window_exist():
+                return self.discord_handle
+            else:
+                pass # continue to retrieve the window handle
+
         hwnds = pywinauto.findwindows.find_windows(title_re=".*- Discord")
         if len(hwnds) == 0:
             return None
@@ -118,11 +124,13 @@ class DiscordWindowFinder():
             return None
         hwnd = hwnds[0]
 
-        return hwnd
+        self.discord_handle = hwnd
+        return self.discord_handle
 
     def _get_window_region(self) -> Rect | None:
+        hwnd = self.get_discord_window_handle()
         rect = ctypes.wintypes.RECT()
-        ctypes.windll.user32.GetWindowRect(self.hwnd.get(), ctypes.pointer(rect))
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.pointer(rect))
         return Rect.from_ltrb(rect.left, rect.top, rect.right, rect.bottom)
 
     def _get_discord_region(self) -> Rect:
