@@ -55,7 +55,7 @@ class LocatorUserImages():
         x = 116 # user images are typically at x=116
         y = 0
         w = 50 # user images are very small
-        h = self.discord_frame_grabber.camera.height
+        h = self.discord_frame_grabber.monitor_area.height
         reg = Rect.from_xywh(x, y, w, h)
 
         slice = self.discord_frame_grabber.grab(reg)

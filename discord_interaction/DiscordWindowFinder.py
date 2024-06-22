@@ -2,7 +2,6 @@ import ctypes
 import os
 import sys
 
-import dxcam
 import numpy as np
 import pywinauto
 import screeninfo
@@ -16,20 +15,12 @@ class DiscordWindowFinder():
     """ Utility class to locate the discord window. """
 
     def __init__(self):
-        self.dxcam_idx: int = 0
-        self.camera: dxcam.DXCamera = None
-        self.monitor_loc: Pxy = None
+        self.monitor_idx: int = 0
+        self.monitor_area: Rect = None
         self.discord_handle: int = None
+        self.last_discord_reg: Rect = None
 
-        self._get_camera_for_discord()
-    
-    def __del__(self):
-        if self.camera is not None:
-            try:
-                self.camera.release()
-            except Exception:
-                pass
-        self.camera = None
+        self._update_window_for_discord()
 
     @property
     def width(self):
@@ -39,17 +30,27 @@ class DiscordWindowFinder():
     def height(self):
         return self._get_window_region().height
     
-    def _get_camera_for_discord(self):
-        """ Chooses the camera application in which discord is currently visible. """
+    def _update_window_for_discord(self, discord_reg: Rect = None):
+        """ Chooses the window in which discord is currently visible. """
         # get the region of the continuous screen in which to find discord.
-        reg: Rect = self._get_discord_region()
+        if discord_reg is None:
+            discord_reg = self._get_discord_region()
+
+        # Assume that if the discord location hasn't changed,
+        # then the window hasn't changed.
+        if discord_reg == self.last_discord_reg:
+            return
+        self.last_discord_reg = discord_reg
 
         # choose the monitor that contains the center pixel for discord
-        target_pixel: Pxy = reg.top_left + Pxy(int(reg.width / 2), int(reg.height / 2))
-        self.dxcam_idx, self.monitor_loc = self._get_matching_monitor_idx_loc(target_pixel)
+        middle_pixel = Pxy(int(discord_reg.width / 2), int(discord_reg.height / 2))
+        target_pixel: Pxy = discord_reg.top_left + middle_pixel
+        monitor_idx, monitor_area = self._get_matching_monitor_idx_area(target_pixel)
 
-        # setup the camera for the discord screen
-        self.camera = dxcam.create(output_idx=self.dxcam_idx)
+        # set internal values
+        if monitor_idx != self.monitor_idx:
+            print(f"New monitor: {monitor_idx}")
+            self.monitor_idx, self.monitor_area = monitor_idx, monitor_area
     
     def does_window_exist(self):
         hwnd = self.discord_handle
@@ -63,12 +64,16 @@ class DiscordWindowFinder():
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, 9)
     
-    def grab(self, reg: Rect = None) -> np.ndarray:
-        """ Grabs an image from the screen, relative to Discord's window """
-        # get the discord region, normalized to the discord monitor's location
+    def _grab(self, reg: Rect = None) -> np.ndarray:
+        # get the discord location
         discord_reg = self._get_discord_region()
-        discord_reg -= self.monitor_loc
-        tl_corner = discord_reg.top_left.clip(0, self.camera.width, 0, self.camera.height)
+
+        # get the latest monitor index and region
+        self._update_window_for_discord(discord_reg)
+
+        # normalize the discord region to the discord monitor's location
+        discord_reg -= self.monitor_area.top_left
+        tl_corner = discord_reg.top_left.clip(0, self.monitor_area.width, 0, self.monitor_area.height)
 
         # normalize input
         if reg is None:
@@ -79,17 +84,17 @@ class DiscordWindowFinder():
         reg = reg.clip(0, tl_corner.x + discord_reg.width, 0, tl_corner.y + discord_reg.height)
 
         # restrict to the bounds of the discord monitor
-        reg = reg.clip(0, self.camera.width, 0, self.camera.height)
+        reg = reg.clip(0, self.monitor_area.width, 0, self.monitor_area.height)
 
         # grab the region
-        ret = self.camera.grab(reg.to_ltrb())
-        if ret is None:
-            # DXcam only seems to work when the screen is being actively redrawn,
-            # fall back on Pillow.
-            ret_img = ImageGrab.grab((reg + self.monitor_loc).to_ltrb(), all_screens=True)
-            ret = np.array(ret_img)
-
+        ret_img = ImageGrab.grab((reg + self.monitor_area.top_left).to_ltrb(), all_screens=True)
+        ret = np.array(ret_img)
+        
         return ret
+    
+    def grab(self, reg: Rect = None) -> np.ndarray:
+        """ Grabs an image from the screen, relative to Discord's window """
+        return self._grab(reg)
     
     def window_corner(self, corner='tl') -> Pxy:
         """ Get the corner of the discord window, in virtual screen coordinates """
@@ -140,7 +145,26 @@ class DiscordWindowFinder():
         return reg
 
     @staticmethod
-    def _get_matching_monitor_idx_loc(screen_location: Pxy) -> tuple[int, Pxy]:
+    def _get_matching_monitor_idx_area(screen_location: Pxy) -> tuple[int, Pxy]:
+        """ Finds the monitor that contains the given virtual screen pixel.
+
+        Parameters
+        ----------
+        screen_location : Pxy
+            The virtual screen pixel to find a matching monitor for.
+
+        Returns
+        -------
+        monitor_idx: int
+            The index of the monitor that contains the screen location.
+        monitor_area: Rect
+            The monitor's area on the virtual screen.
+
+        Raises
+        ------
+        RuntimeError
+            IF the given screen_location isn't located within any of the found monitors
+        """        
         # get monitor working areas
         output_working_areas: list[Rect] = []
         for i, monitor in enumerate(screeninfo.get_monitors()):
@@ -149,6 +173,6 @@ class DiscordWindowFinder():
         # choose the monitor that contains the center pixel for discord
         for i, area in enumerate(output_working_areas):
             if area.contains(screen_location):
-                return i, area.top_left
+                return i, area
         
         raise RuntimeError(f"Could not find a monitor containing virtual screen location {screen_location}")

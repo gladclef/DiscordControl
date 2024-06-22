@@ -105,3 +105,8 @@ class Rect():
 	
 	def __repr__(self):
 		return "Rect{x:%d,y:%d,w:%d,h:%d}" % (self.x, self.y, self.width, self.height)
+
+	def __eq__(self, other: "Rect") -> bool:
+		if not isinstance(other, Rect):
+			return False
+		return self.top_left == other.top_left and self.bottom_right == other.bottom_right
