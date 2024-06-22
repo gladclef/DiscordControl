@@ -11,15 +11,16 @@ from pynput.keyboard import Key
 from pynput.mouse import Button
 from pynput.mouse import Controller as Mouse
 
-sys.path.append(os.path.normpath(os.path.join(__file__, "..", "..")))
+root = os.path.normpath(os.path.join(__file__, "..", ".."))
+sys.path.append(root)
 from discord_interaction.DiscordWindowFinder import DiscordWindowFinder
 from discord_interaction.LocatorUserImages import LocatorUserImages
 from discord_interaction.User import User
 from Fresh import Fresh
 from geometry import Pxy, Rect
 
-app_images_dir = "C:/Users/gladc/OneDrive/Documents/3d prints/deej/software/pics"
-user_images_dir = "C:/Users/gladc/OneDrive/Documents/3d prints/deej/software/pics/user_pics"
+app_images_dir = os.path.join(root, "media")
+user_images_dir = os.path.join(root, "media/user_pics")
 
 keyboard = Keyboard()
 mouse = Mouse()
