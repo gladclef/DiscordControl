@@ -30,6 +30,16 @@ class Action():
     
     def __repr__(self):
         return "A{%s,%f}" % (self.action_type, self.data)
+    
+    
+def watch_user_images():
+    while True:
+        try:
+            dapi.dapi.user_locator.check_user_images_files()
+        except Exception as ex:
+            print(repr(ex))
+        
+        time.sleep(10)
 
 
 def select_user(user_idx: int):
@@ -68,37 +78,38 @@ def evaluate_actions():
     global action_queue
 
     while True:
-        if len(action_queue) > 0:
-            last_action = action_queue[-1]
+        if len(action_queue) == 0:
+            time.sleep(0.02)
+            continue
 
-            if last_action.action_type == "mute":
-                action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
-                try:
-                    if last_action.data < 0.5:
-                        dapi.mute()
-                    else:
-                        dapi.unmute()
-                except Exception as ex:
-                    print(last_action.action_type + ": " + repr(ex))
-                    pass
+        last_action = action_queue[-1]
 
-            elif last_action.action_type == "next_user":
-                action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
-                try:
-                    select_next_user()
-                except Exception as ex:
-                    print(last_action.action_type + ": " + repr(ex))
-                    pass
+        if last_action.action_type == "mute":
+            action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
+            try:
+                if last_action.data < 0.5:
+                    dapi.mute()
+                else:
+                    dapi.unmute()
+            except Exception as ex:
+                print(last_action.action_type + ": " + repr(ex))
+                pass
 
-            elif last_action.action_type == "set_volume":
-                action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
-                try:
-                    adjust_user_volume(last_action.data)
-                except Exception as ex:
-                    print(last_action.action_type + ": " + repr(ex))
-                    pass
+        elif last_action.action_type == "next_user":
+            action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
+            try:
+                select_next_user()
+            except Exception as ex:
+                print(last_action.action_type + ": " + repr(ex))
+                pass
 
-        time.sleep(0.01)
+        elif last_action.action_type == "set_volume":
+            action_queue = list(filter(lambda a: a.action_type != last_action.action_type, action_queue))
+            try:
+                adjust_user_volume(last_action.data)
+            except Exception as ex:
+                print(last_action.action_type + ": " + repr(ex))
+                pass
 
 
 def listen(ipaddr: str, port: int):
@@ -113,32 +124,34 @@ def listen(ipaddr: str, port: int):
 
 if __name__ == "__main__":
     # We can use a with statement to ensure threads are cleaned up promptly
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(UDP_PORTs)+1) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(UDP_PORTs)+2) as executor:
         # Start each listener
         futures = [executor.submit(listen, UDP_IP, port) for port in UDP_PORTs]
         futures.append(executor.submit(evaluate_actions))
+        futures.append(executor.submit(watch_user_images))
         
         # Wait until all futures have completed
         while True:
-            if len(messages) > 0:
-                messages_by_port: dict[int, str] = {}
-                while len(messages) > 0:
-                    port, data = messages.pop()
-                    messages_by_port[port] = data
-                
-                for port in messages_by_port:
-                    data = messages_by_port[port]
-                    data = float(data.decode("utf-8"))
-                    print("received message on port %d: %f" % (port, data))
+            if len(messages) == 0:
+                time.sleep(0.02)
+                continue
 
-                    try:
-                        if port == 6331:
-                            action_queue.append(Action("mute", data))
-                        if port == 6332:
-                            action_queue.append(Action("next_user"))
-                        if port == 6333:
-                            action_queue.append(Action("set_volume", data))
-                    except Exception as ex:
-                        print(ex)
+            messages_by_port: dict[int, str] = {}
+            while len(messages) > 0:
+                port, data = messages.pop()
+                messages_by_port[port] = data
+            
+            for port in messages_by_port:
+                data = messages_by_port[port]
+                data = float(data.decode("utf-8"))
+                print("received message on port %d: %f" % (port, data))
 
-            time.sleep(0.05)
+                try:
+                    if port == 6331:
+                        action_queue.append(Action("mute", data))
+                    if port == 6332:
+                        action_queue.append(Action("next_user"))
+                    if port == 6333:
+                        action_queue.append(Action("set_volume", data))
+                except Exception as ex:
+                    print(ex)

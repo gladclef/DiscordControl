@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 
@@ -7,6 +8,7 @@ from PIL import Image
 
 sys.path.append(os.path.normpath(os.path.join(__file__, "..", "..")))
 from discord_interaction.DiscordWindowFinder import DiscordWindowFinder
+from discord_interaction.User import UpdateStatus as UserUpdateStatus
 from discord_interaction.User import User
 from geometry import Pxy, Rect
 
@@ -17,11 +19,11 @@ class LocatorUserImages():
     def __init__(self, discord_frame_grabber: DiscordWindowFinder, user_images_dir: str):
         self.discord_frame_grabber = discord_frame_grabber
         self.user_images_dir = user_images_dir
-        self.user_images: dict[str, np.ndarray] = None
+        self.users: list[User] = []
         """ Dict of file names+ext (no path) to the loaded and pre-processed image """
 
-        # populate the user_images
-        self.load_user_images()
+        # populate the users
+        self.load_users_as_necessary()
 
     @staticmethod
     def _load_images_from_dir(images_dir: str) -> dict[str, np.ndarray]:
@@ -37,19 +39,28 @@ class LocatorUserImages():
 
         return ret
 
-    def load_user_images(self) -> list[np.ndarray]:
-        if self.user_images is not None:
-            return self.user_images
+    def load_users_as_necessary(self) -> list[User]:
+        # get a list of already loaded user images
+        already_loaded: set[str] = {user.voice_icon_path_name_ext for user in self.users}
         
+        # load any new images
         images_from_dir = self._load_images_from_dir(self.user_images_dir)
-        
-        self.user_images = {}
         for path_name_ext in images_from_dir:
-            name_ext = os.path.basename(path_name_ext)
-            square_image = images_from_dir[path_name_ext][6:18, 6:18, :3]
-            self.user_images[name_ext] = square_image
+            if path_name_ext not in already_loaded:
+                self.users.append(User(path_name_ext))
 
-        return self.user_images
+        return self.users
+    
+    def check_user_images_files(self):
+        """ Checks for new (or stale) user image files and reloads or unloads them, as necessary. """
+        # check for any users that need to be reloaded or unloaded
+        for user in copy.copy(self.users):
+            update_status = user.update_as_necessary()
+            if update_status == UserUpdateStatus.unloaded:
+                self.users.remove(user)
+        
+        # check for any image files that don't yet have a matching user
+        self.load_users_as_necessary()
 
     def grab_user_images_slice(self) -> tuple[np.ndarray, Pxy]:
         x = 116 # user images are typically at x=116
@@ -75,25 +86,25 @@ class LocatorUserImages():
             images highlighted.
         """
         slice, window_offset = self.grab_user_images_slice()
-        users: list[User] = []
+        newly_located_users: list[User] = []
         annotated_slice = slice.copy()
 
-        for name_ext in self.user_images:
-            user_image = self.user_images[name_ext]
+        for user in self.users:
+            voice_icon = user.cropped_voice_icon
 
             # Start by matching off the corner pixels (and center pixel).
             # We do this for speed, since np.where and np.logical_and are much
             # faster than scanning through the entire slice for the user image.
-            w, h = user_image.shape[1], user_image.shape[0]
+            w, h = voice_icon.shape[1], voice_icon.shape[0]
             sample_pixels = Rect.from_xywh(0, 0, w, h).get_corners_xy(True)
             sample_pixels.append(Pxy(int(w/2), int(h/2)))
             matches: list[bool] = []
             for i, pixel in enumerate(sample_pixels):
                 shifted_slice = slice[pixel.y:slice.shape[0]-(h-pixel.y-1), pixel.x:slice.shape[1]-(w-pixel.x-1)]
                 if i == 0:
-                    matches = shifted_slice == user_image[pixel.y, pixel.x]
+                    matches = shifted_slice == voice_icon[pixel.y, pixel.x]
                 else:
-                    matches = np.logical_and(matches, shifted_slice == user_image[pixel.y, pixel.x])
+                    matches = np.logical_and(matches, shifted_slice == voice_icon[pixel.y, pixel.x])
             matching_coords = np.where(matches)
 
             # Search for exact matches to our approximate matches
@@ -101,7 +112,7 @@ class LocatorUserImages():
             match: Rect = None
             for x, y in zip(x_searches, y_searches):
                 if x+w <= slice.shape[1] and y+h <= slice.shape[0]:
-                    if np.all(slice[y:y+h, x:x+w] == user_image):
+                    if np.all(slice[y:y+h, x:x+w] == voice_icon):
                         match = Rect.from_xywh(x, y, w, h)
                         break
             if match is None:
@@ -109,13 +120,14 @@ class LocatorUserImages():
 
             # Add the match to our return value
             window_rel_match = match + window_offset
-            users.append(User(os.path.join(self.user_images_dir, name_ext), window_rel_match))
+            user.voice_icon_region = window_rel_match
+            newly_located_users.append(user)
 
             # Debugging: draw the rectangle on large_image
             magenta = (255,0,255)
             annotated_slice = cv2.rectangle(annotated_slice, match.top_left.astuple(), match.bottom_right.astuple(), magenta, thickness=2)
         
         # Sort users by their y-location
-        users = sorted(users, key=lambda u: u.voice_icon_region.y)
+        newly_located_users = sorted(newly_located_users, key=lambda u: u.voice_icon_region.y)
         
-        return users, annotated_slice
+        return newly_located_users, annotated_slice
